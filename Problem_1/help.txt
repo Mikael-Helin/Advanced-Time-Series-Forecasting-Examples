@@ -1,0 +1,5 @@
+run 
+
+    python3 download_tickers.py # Downloads all tickers
+    python3 filter_tickers.py
+    python3 solver.py
