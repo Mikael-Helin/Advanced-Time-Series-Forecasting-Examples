@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 # Constants
 INPUT_FILE = '../Data/combined_data.parquet'            # The raw data from Step 1
-OUTPUT_FILE = '../Data/closing_prices.parquet'   # The result we want to save
+OUTPUT_FILE = '../Data/closing_prices.parquet'          # The result we want to save
 START_CAPITAL = 100_000
 REBALANCE_COST = 0.01
 END_DATE = pd.Timestamp('2024-12-31')
@@ -29,17 +29,6 @@ portfolio_history = {
     'D': [],
     'E': []
 }
-
-def get_first_mondays(start_year, end_year):
-    """Get all first Mondays of each month in the range."""
-    dates = []
-    for year in range(start_year, end_year + 1):
-        for month in range(1, 13):
-            d = datetime(year, month, 1)
-            while d.weekday() != 0:
-                d += timedelta(days=1)
-            dates.append(d)
-    return dates
 
 def test_log_returns(df_test):
     """
@@ -125,18 +114,19 @@ def optimize_portfolio(df_closing):
         one_year_ago = rebalance_date - pd.Timedelta(days=365)
         five_years_ago = rebalance_date - pd.Timedelta(days=365*5)
 
-        monthly_prices_1y = df_closing.loc[one_year_ago:rebalance_date].resample('ME').last().dropna()
-        monthly_prices_5y = df_closing.loc[five_years_ago:rebalance_date].resample('ME').last().dropna()
+        # Do not dropna() here, as it drops the entire row if ANY ticker is missing data
+        monthly_prices_1y = df_closing.loc[one_year_ago:rebalance_date].resample('ME').last()
+        monthly_prices_5y = df_closing.loc[five_years_ago:rebalance_date].resample('ME').last()
         
-        monthly_log_returns_1y = np.log(monthly_prices_1y / monthly_prices_1y.shift(1)).dropna()
-        monthly_log_returns_5y = np.log(monthly_prices_5y / monthly_prices_5y.shift(1)).dropna()
+        monthly_log_returns_1y = np.log(monthly_prices_1y / monthly_prices_1y.shift(1))
+        monthly_log_returns_5y = np.log(monthly_prices_5y / monthly_prices_5y.shift(1))
 
+        # Calculate mean/std ignoring NaNs (pandas default)
         monthly_log_returns_1y_mean = monthly_log_returns_1y.mean()
         monthly_log_returns_5y_mean = monthly_log_returns_5y.mean()
         monthly_log_returns_1y_std = monthly_log_returns_1y.std()
         monthly_log_returns_5y_std = monthly_log_returns_5y.std()
 
-        # monthly_simple_returns_1y_mean = log_to_simple_monthly_mean(monthly_log_returns_1y_mean, monthly_log_returns_1y_std)
         yearly_simple_returns_1y_std = log_to_simple_yr_std(monthly_log_returns_1y_mean, monthly_log_returns_1y_std)
         monthly_simple_returns_5y_mean = log_to_simple_monthly_mean(monthly_log_returns_5y_mean, monthly_log_returns_5y_std)
         yearly_simple_returns_5y_std = log_to_simple_yr_std(monthly_log_returns_5y_mean, monthly_log_returns_5y_std)
@@ -148,11 +138,22 @@ def optimize_portfolio(df_closing):
             'D': {"ticker": None, "monthly_simple_return": -1000},
             'E': {"ticker": None, "monthly_simple_return": -1000},
         }
+        
+        # Iterate over tickers that have at least some data
         for ticker in monthly_log_returns_5y.columns:
+            # Check if we have enough data points for this ticker
+            # For 5 years, we expect ~60 months. Let's require at least 48 (4 years).
+            if monthly_log_returns_5y[ticker].count() < 48:
+                print(f"UNEXPECTED: Skipping {ticker}: Not enough data points for 5 years !!!!!!!!!!!")
+                continue
+                
             # m_1y = monthly_simple_returns_1y_mean[ticker]
             m_5y = monthly_simple_returns_5y_mean[ticker]
             s_1y = yearly_simple_returns_1y_std[ticker]
             s_5y = yearly_simple_returns_5y_std[ticker]
+            
+            if pd.isna(m_5y) or pd.isna(s_1y) or pd.isna(s_5y):
+                continue
 
             category = get_category(s_1y, s_5y)
             if m_5y > best_in_group[category]['monthly_simple_return']:
@@ -181,12 +182,50 @@ def optimize_portfolio(df_closing):
         'E': []
     }
     
-    mondays = df_closing.index[df_closing.index.weekday == 0]
-    today = mondays[0]
+    def get_trading_days(df, start_date, end_date):
+        """Get the first trading day of each month."""
+        trading_days = []
+        # Generate month start dates
+        dates = pd.date_range(start=start_date, end=end_date, freq='MS')
+        for d in dates:
+            # Find first available date in df on or after d
+            mask = (df.index >= d)
+            available = df.index[mask]
+            if not available.empty:
+                # Check if it's still in the same month (just to be safe, though likely yes)
+                first_day = available[0]
+                if first_day.month == d.month and first_day.year == d.year:
+                    trading_days.append(first_day)
+        return trading_days
+
+    # Generate monthly trading days
+    trading_days = get_trading_days(df_closing, '2017-01-01', END_DATE)
+
+    if not trading_days:
+        print("No trading days found!")
+        return
+
+    today = trading_days[0]
     best_in_group = find_best_in_group(today)
 
     for category in best_in_group:
         ticker = best_in_group[category]['ticker']
+        
+        # Handle case where no ticker was found
+        if ticker is None:
+            print(f"No suitable ticker found for category {category} on {today.date()}")
+            d = {
+                "ticker": None,
+                "amount": 0,
+                "value_in": START_CAPITAL, # Assuming cash held
+                "value_out": START_CAPITAL,
+                "monthly_simple_return": 0,
+                "yearly_simple_std": 0,
+                "category": category
+            }
+            portfolio[category].append(d)
+            continue
+
         amount_buy = buy_ticker(ticker, today, START_CAPITAL)
         monthly_simple_return = best_in_group[category]['monthly_simple_return']
         yearly_simple_std = best_in_group[category]['yearly_simple_std']
@@ -202,13 +241,72 @@ def optimize_portfolio(df_closing):
         portfolio[category].append(d)
     
     # Trading bot stepping through time
-    for today in mondays[1:]:
+    for today in trading_days[1:]:
         last_best_in_group = best_in_group.copy()
         best_in_group = find_best_in_group(today)
 
         for category in best_in_group:
             old_ticker = last_best_in_group[category]['ticker']
             new_ticker = best_in_group[category]['ticker']
+            
+            # Case 0: No ticker found previously or currently
+            if old_ticker is None and new_ticker is None:
+                 d = {
+                    "ticker": None,
+                    "amount": 0,
+                    "value_in": portfolio[category][-1]['value_out'],
+                    "value_out": portfolio[category][-1]['value_out'],
+                    "monthly_simple_return": 0,
+                    "yearly_simple_std": 0,
+                    "category": category
+                }
+                 portfolio[category].append(d)
+                 continue
+            
+            # Case 0.5: No ticker found currently, but we have one from before. 
+            # Strategy: Sell everything and hold cash? Or keep holding? 
+            # Let's assume we sell and hold cash if no suitable ticker is found.
+            if new_ticker is None:
+                 # If we had a ticker, sell it.
+                 amount_old = portfolio[category][-1]['amount']
+                 price_old = df_closing.loc[today, old_ticker]
+                 value_out = amount_old * price_old
+                 
+                 d = {
+                    "ticker": None,
+                    "amount": 0,
+                    "value_in": value_out,
+                    "value_out": value_out,
+                    "monthly_simple_return": 0,
+                    "yearly_simple_std": 0,
+                    "category": category
+                }
+                 print(f"Selling {old_ticker} and holding cash in category {category} on {today.date()}")
+                 portfolio[category].append(d)
+                 continue
+
+            # Case 0.75: We had no ticker, but now we found one.
+            if old_ticker is None:
+                 # Buy new ticker with available cash
+                 cash_available = portfolio[category][-1]['value_out']
+                 amount_new = buy_ticker(new_ticker, today, cash_available)
+                 monthly_simple_return = best_in_group[category]['monthly_simple_return']
+                 yearly_simple_std = best_in_group[category]['yearly_simple_std']
+                 
+                 d = {
+                    "ticker": new_ticker,
+                    "amount": amount_new,
+                    "value_in": cash_available,
+                    "value_out": cash_available,
+                    "monthly_simple_return": monthly_simple_return,
+                    "yearly_simple_std": yearly_simple_std,
+                    "category": category
+                 }
+                 print(f"Buying {new_ticker} with cash in category {category} on {today.date()}")
+                 portfolio[category].append(d)
+                 continue
+
+
             # Same ticker as last time, update values
             if old_ticker == new_ticker:
                 amount = portfolio[category][-1]['amount']
@@ -278,9 +376,14 @@ def optimize_portfolio(df_closing):
         final_entry = portfolio[category][-1]
         ticker = final_entry['ticker']
         amount = final_entry['amount']
-        price = df_closing.loc[END_DATE, ticker]
-        final_value = amount * price
-        print(f"Category {category}: Ticker {ticker}, Final Value: ${final_value:,.2f}")
+        
+        if ticker is None:
+             final_value = final_entry['value_out']
+             print(f"Category {category}: No Ticker, Final Value: ${final_value:,.2f}")
+        else:
+            price = df_closing.loc[END_DATE, ticker]
+            final_value = amount * price
+            print(f"Category {category}: Ticker {ticker}, Final Value: ${final_value:,.2f}")
 
 
 def main():
@@ -305,8 +408,12 @@ def main():
                 df = df.reset_index()
             df_closing = df.pivot(index='Date', columns='Ticker', values='Close')
 
+
         # Restrict to start date
-        df_closing = df_closing.loc['2017-01-02':]
+        # df_closing = df_closing.loc['2017-01-02':]
+
+        # Clean data: Replace 0 or negative prices with NaN to avoid log errors
+        df_closing = df_closing.where(df_closing > 0)
 
         # Save to parquet
         df_closing.to_parquet(OUTPUT_FILE)
@@ -314,6 +421,8 @@ def main():
 
     else:
         df_closing = pd.read_parquet(OUTPUT_FILE)
+        # Clean data: Replace 0 or negative prices with NaN
+        df_closing = df_closing.where(df_closing > 0)
         print(f"Loaded pivoted data from {OUTPUT_FILE}")
 
     # Run validation tests
