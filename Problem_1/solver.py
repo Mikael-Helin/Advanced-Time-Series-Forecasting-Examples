@@ -141,6 +141,8 @@ cash_portfolio = {
     "ticker": "cash",
     "price": 1.0,
     "num_shares": START_CAPITAL,
+    "networth": START_CAPITAL,
+    "rebalance": False,
 }
 for category in ["A", "B", "C", "D", "E", "F"]:
     temp_portfolios[category] = cash_portfolio.copy()
