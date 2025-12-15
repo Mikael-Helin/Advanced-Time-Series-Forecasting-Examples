@@ -6,58 +6,52 @@ import random
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 
-# Constants
-DATA_DIR = '../Data'
-RAW_DATA_DIR = os.path.join(DATA_DIR, 'raw')
-NYSE_FILE = os.path.join(DATA_DIR, 'nyse_listed.csv')
-START_DATE = '1980-01-01'
+# -- Variables --
 
-def setup():
-    if not os.path.exists(RAW_DATA_DIR):
-        os.makedirs(RAW_DATA_DIR)
+DATA_DIR = "../Data"
+RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
+NYSE_FILE = os.path.join(DATA_DIR, "nyse_listed.csv")
+START_DATE = "1980-01-01"
+END_DATE = "2025-01-01"
 
-def get_tickers():
-    if not os.path.exists(NYSE_FILE):
-        return []
-    df = pd.read_csv(NYSE_FILE)
-    # Support both column names commonly found in NYSE lists
-    col = 'ACT Symbol' if 'ACT Symbol' in df.columns else 'Symbol'
-    return df[col].dropna().unique().tolist() if col in df.columns else []
+if not os.path.exists(RAW_DATA_DIR):
+    os.makedirs(RAW_DATA_DIR)
+    
+if not os.path.exists(NYSE_FILE):
+    exit(NYSE_FILE + " not found")
+
+df = pd.read_csv(NYSE_FILE)
+tickers_list = df["ACT Symbol"].dropna().unique().tolist()
 
 def download_ticker(ticker):
-    path = os.path.join(RAW_DATA_DIR, f"{ticker}.csv")
-    
-    if os.path.exists(path):
-        return
-
     # Random sleep to avoid IP bans (essential for bulk downloads)
     time.sleep(random.uniform(0.1, 0.5))
 
     try:
         # Simplest possible call - let yfinance handle the networking
-        df = yf.download(ticker, start=START_DATE, progress=False, threads=False)
-        
-        if not df.empty:
-            # Flatten MultiIndex if present (fixes format issues)
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-            
-            # Save only valid columns
-            df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
-            df.to_csv(path)
-
+        df = yf.download(ticker, start=START_DATE, end=END_DATE, progress=False, threads=False, ignore_tz=True, auto_adjust=True, rounding=True)
+        if df.empty:
+            print("Empty data for " + ticker)
+            return False
     except Exception:
-        pass # Skip errors, we will filter bad files in Step 2
+        print("Failed to download " + ticker)
+        return False
+        
+    try:
+        path = os.path.join(RAW_DATA_DIR, f"{ticker}.csv")
+        df.to_csv(path)
+        return True
+    except Exception:
+        print("Failed to save " + ticker)
+        return False
 
-def main():
-    setup()
-    tickers = get_tickers()
-    random.shuffle(tickers) # Shuffle to distribute load
-    
-    print(f"Downloading {len(tickers)} tickers (Max 8 threads)...")
-    
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        list(tqdm(executor.map(download_ticker, tickers), total=len(tickers)))
+# Download all tickers
+downloaded_tickers = []
+for ticker in tickers_list:
+    success = download_ticker(ticker)
+    if success:
+        downloaded_tickers.append(ticker)
 
-if __name__ == "__main__":
-    main()
+print("List has " + str(len(tickers_list)) + " tickers")
+print("Downloaded " + str(len(downloaded_tickers)) + " tickers")
+    

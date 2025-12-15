@@ -1,103 +1,105 @@
 import pandas as pd
 import os
-from tqdm import tqdm
+import numpy as np
 
-# Constants
-DATA_DIR = '../Data'
-RAW_DATA_DIR = os.path.join(DATA_DIR, 'raw')
-OUTPUT_PARQUET = os.path.join(DATA_DIR, 'combined_data.parquet')
-REQUIRED_DENSITY = 200 
-MIN_START_DATE = pd.Timestamp('2012-01-01')
+# --- Variables ---
 
-def process_all_data():
-    valid_data_frames = []
-    files = [f for f in os.listdir(RAW_DATA_DIR) if f.endswith('.csv')]
-    
-    print(f"Processing {len(files)} files with high-performance filter...")
+DEBUG = True
 
-    # Iterate through all files
-    for f in tqdm(files):
+DATA_DIR = "../Data"
+RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
+CLEANED_TICKERS = os.path.join(DATA_DIR, "nyse_cleaned.csv")
+OUTPUT_PARQUET = os.path.join(DATA_DIR, "nyse_cleaned.parquet")
+
+# Date Constraints
+# We filter data starting from Jan 1st
+MEASUREMENTS_START_DATE = pd.Timestamp("2011-12-22")
+MEASUREMENTS_END_DATE = pd.Timestamp("2024-12-31")
+
+# Assume at least 220 trading dates per year, we have 14 years 
+MIN_ROWS = 220 * 14
+
+# --- Code ---
+
+def debug_print(something):
+    if DEBUG:
+        print(something)
+
+# A stock is valid if it starts ON or BEFORE MEASUREMENTS_START_DATE and ends ON or AFTER MEASUREMENTS_END_DATE
+valid_tickers = []
+valid_dfs = []
+for ticker_file in os.listdir(RAW_DATA_DIR):
+    if ticker_file.endswith(".csv"):
+        # 1. Read CSV
+        file_path = os.path.join(RAW_DATA_DIR, ticker_file)
         try:
-            file_path = os.path.join(RAW_DATA_DIR, f)
-            ticker_name = f.replace('.csv', '')
-            
-            # Read file
-            df = pd.read_csv(file_path, index_col=0, parse_dates=True)
-            
-            # Handle duplicate columns (e.g. Close, Close.1)
-            # Some files have empty columns with the original name and data in the .1 column
-            for col in ['Close', 'Open', 'High', 'Low', 'Volume']:
-                # Find all columns that start with the name (e.g. Close, Close.1, Close.2)
-                candidates = [c for c in df.columns if c == col or c.startswith(f"{col}.")]
-                
-                if len(candidates) > 1:
-                    # Pick the one with the most non-NaN values
-                    best_col = max(candidates, key=lambda c: df[c].count())
-                    
-                    # If the best column isn't the original name, replace the original with it
-                    if best_col != col:
-                        df[col] = df[best_col]
-                    
-                    # Drop the duplicates/suffixes, keep only the canonical name
-                    cols_to_drop = [c for c in candidates if c != col]
-                    df.drop(columns=cols_to_drop, inplace=True)
-            
-            if df.empty: continue
-
-            # --- Validation Logic ---
-            start = df.index[0]
-            end = df.index[-1]
-            total_days = (end - start).days
-            
-            if total_days <= 0: continue
-
-            # Start Date Check
-            if start > MIN_START_DATE:
-                # print(f"Skipping {ticker_name}: Starts too late ({start.date()})")
-                continue
-
-            # Negative Price Check
-            if df['Close'].min() <= 0:
-                # print(f"Skipping {ticker_name}: Contains negative or zero prices")
-                continue
-
-            # Density Check
-            expected_count = (total_days / 365.0) * REQUIRED_DENSITY
-            # print(f"Density check: {ticker_name} has {len(df):,} rows, expected {expected_count:,}")
-            if len(df) <= expected_count:
-                continue
-            
-            # --- Preparation ---
-            # Tag the data with the Ticker name so we can distinguish it later
-            df['Ticker'] = ticker_name
-            df.index.name = 'Date'
-            
-            # Add to list (RAM is cheap for you, so we keep it all)
-            valid_data_frames.append(df)
-
-        except Exception:
+            df = pd.read_csv(
+                file_path, 
+                skiprows=[0, 1, 2], 
+                names=["Date", "Close", "High", "Low", "Open", "Volume"], 
+                usecols=["Date", "Close"], # Load only what we need
+                index_col=0, 
+                parse_dates=True,
+                date_format="%Y-%m-%d"
+            )
+        except Exception as e:
+            print(f"Error reading {ticker_file}: {e}")
             continue
 
-    if valid_data_frames:
-        print(f"\nMerging {len(valid_data_frames)} datasets into one Giant DataFrame...")
+        # 2. Check Validity
+        if df.empty: continue
         
-        # This operation is heavy for 16GB RAM, but instant for 256GB
-        master_df = pd.concat(valid_data_frames)
-        
-        print(f"Success! Created DataFrame with {len(master_df):,} rows.")
-        print("-" * 30)
+        if df.index[0] > MEASUREMENTS_START_DATE:
+            continue # Started too late (IPO after Jan 2012)
+            
+        if df.index[-1] < MEASUREMENTS_END_DATE:
+            continue # Delisted before end of 2024
 
-        # Save as Parquet (Recommended for speed)
-        # Requires: pip install pyarrow
-        try:
-            print(f"Saving to {OUTPUT_PARQUET} (Fastest)...")
-            master_df.to_parquet(OUTPUT_PARQUET)
-        except ImportError:
-            print("To save as Parquet (much faster), run: pip install pyarrow")
-        
-        print("Done.")
-    else:
-        print("No valid data found.")
+        # 3. Filter Date Range and Close Column
+        ticker = ticker_file[:-4]
+        df = df.loc[MEASUREMENTS_START_DATE:MEASUREMENTS_END_DATE, ["Close"]]
 
-if __name__ == "__main__":
-    process_all_data()
+        if len(df) < MIN_ROWS:
+            debug_print(f"Not enough data for {ticker}")
+            continue # Not enough data
+
+
+        # If daily volatility * sqrt(21) is too different from monthly volatility, do not add ticker
+        daily_returns = df["Close"] / df["Close"].shift(1) - 1
+        daily_vol = daily_returns.std()
+        
+        monthly_close = df["Close"].resample("ME").last()
+        monthly_returns = monthly_close / monthly_close.shift(1) - 1
+        monthly_vol = monthly_returns.std()
+
+        if daily_vol * np.sqrt(21) < monthly_vol / 1.25:
+            debug_print(f"Removing {ticker} daily volatility {daily_vol} is too different from monthly volatility {monthly_vol}")
+            continue
+        if daily_vol * np.sqrt(21) > monthly_vol * 1.25:
+            debug_print(f"Removing {ticker} daily volatility {daily_vol} is too different from monthly volatility {monthly_vol}")
+            continue
+        if daily_vol * np.sqrt(21) > 0.6:
+            debug_print(f"Removing {ticker} daily volatility {daily_vol} is too high")
+            continue
+        if monthly_vol > 0.6:
+            debug_print(f"Removing {ticker} monthly volatility {monthly_vol} is too high")
+            continue
+
+        # 4. Prepare for Export
+        clean_df = df[["Close"]].copy()
+        clean_df["Ticker"] = ticker
+        clean_df.index.name = "Date"
+        valid_dfs.append(clean_df)
+        valid_tickers.append(ticker)
+
+# 5. Save
+if valid_dfs:
+    print("Saving valid tickers...")
+    with open(CLEANED_TICKERS, "w") as f:
+        f.write("\n".join(valid_tickers))
+    print(f"Combining {len(valid_dfs)} valid tickers...")
+    final_df = pd.concat(valid_dfs)
+    final_df.to_parquet(OUTPUT_PARQUET, compression="brotli")
+    print(f"Success! Saved to {OUTPUT_PARQUET}")
+else:
+    print("No tickers matched the criteria.")
