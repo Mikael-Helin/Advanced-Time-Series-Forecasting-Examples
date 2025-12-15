@@ -71,7 +71,6 @@ def best_category(category, date_str):
             # get_loc with method='pad' finds the nearest previous index
             idx_loc = monthly_categories.index.get_indexer([date], method='pad')[0]
             date = monthly_categories.index[idx_loc]
-            print(f"Date {date_str} not found. Using nearest previous: {date.date()}")
 
         # Filter by Category
         current_categories = monthly_categories.loc[date]
@@ -149,15 +148,23 @@ for category in ["A", "B", "C", "D", "E", "F"]:
 # 9. Trade bot
 portfolio_history = []
 for date in MS_prices.index:
-    # Update keep portfolios
+    # Update keep portfolios (date is a pandas Timestamp from the index)
     keep_portfolios = {}
-    date = date.date()
+    # Map month-start (MS) dates to month-end (ME) indices used by monthly_* datasets
+    try:
+        me_idx = monthly_simple_returns_5yr.index.get_indexer([date], method='pad')[0]
+        if me_idx == -1:
+            me_date = monthly_simple_returns_5yr.index[0]
+        else:
+            me_date = monthly_simple_returns_5yr.index[me_idx]
+    except Exception:
+        me_date = date
     for category in ["A", "B", "C", "D", "E", "F"]:
         ticker = temp_portfolios[category]["ticker"]
         price = MS_prices.loc[date, ticker]
         num_shares = temp_portfolios[category]["num_shares"]
-        monthly_simple_return_mean_5yr = monthly_simple_returns_5yr.loc[date, ticker]
-        monthly_category = monthly_categories.loc[date, ticker]
+        monthly_simple_return_mean_5yr = monthly_simple_returns_5yr.loc[me_date, ticker]
+        monthly_category = monthly_categories.loc[me_date, ticker]
         keep_portfolios[category] = {
             "ticker": ticker,
             "date": date,
@@ -191,13 +198,21 @@ for date in MS_prices.index:
             temp_portfolios[category] = rebalance_portfolios[category].copy()
         else:
             # Compare which has hiher return
-            keep_return = monthly_simple_returns_5yr.loc[date, keep_portfolios[category]["networth"]]
-            rebalance_return = monthly_simple_returns_5yr.loc[date, rebalance_portfolios[category]["networth"]]
+            keep_ticker = keep_portfolios[category]["ticker"]
+            rebalance_ticker = rebalance_portfolios[category]["ticker"]
+            # Safely fetch returns (default to 0.0 if ticker is 'cash' or missing)
+            try:
+                keep_return = monthly_simple_returns_5yr.loc[me_date, keep_ticker] if keep_ticker in monthly_simple_returns_5yr.columns else 0.0
+            except Exception:
+                keep_return = 0.0
+            try:
+                rebalance_return = monthly_simple_returns_5yr.loc[me_date, rebalance_ticker] if rebalance_ticker in monthly_simple_returns_5yr.columns else 0.0
+            except Exception:
+                rebalance_return = 0.0
             if rebalance_return > keep_return:
                 temp_portfolios[category] = rebalance_portfolios[category].copy()
             else:
                 temp_portfolios[category] = keep_portfolios[category].copy()
     # Log portfolio status
-    print(f"Date: {date.date()}, A: {temp_portfolios['A']['networth']:.2f}, B: {temp_portfolios['B']['networth']:.2f}, C: {temp_portfolios['C']['networth']:.2f}, D: {temp_portfolios['D']['networth']:.2f}, E: {temp_portfolios['E']['networth']:.2f}, F: {temp_portfolios['F']['networth']:.2f}")
-    portfolio_history.append(temp_portfolios.copy())
+    print(f"Date: {date.date()}, A: {temp_portfolios['A']['ticker']} {temp_portfolios['A']['networth']:.2f}, B: {temp_portfolios['B']['ticker']} {temp_portfolios['B']['networth']:.2f}, C: {temp_portfolios['C']['ticker']} {temp_portfolios['C']['networth']:.2f}, D: {temp_portfolios['D']['ticker']} {temp_portfolios['D']['networth']:.2f}, E: {temp_portfolios['E']['ticker']} {temp_portfolios['E']['networth']:.2f},F: {temp_portfolios['F']['ticker']} {temp_portfolios['F']['networth']:.2f}")
 
