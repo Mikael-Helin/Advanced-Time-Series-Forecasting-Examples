@@ -216,5 +216,5 @@ for date in MS_prices.index:
             else:
                 temp_portfolios[category] = keep_portfolios[category].copy()
     # Log portfolio status
-    print(f"Date: {date.date()}, A: {temp_portfolios['A']['ticker']} {temp_portfolios['A']['networth']:.2f}, B: {temp_portfolios['B']['ticker']} {temp_portfolios['B']['networth']:.2f}, C: {temp_portfolios['C']['ticker']} {temp_portfolios['C']['networth']:.2f}, D: {temp_portfolios['D']['ticker']} {temp_portfolios['D']['networth']:.2f}, E: {temp_portfolios['E']['ticker']} {temp_portfolios['E']['networth']:.2f},F: {temp_portfolios['F']['ticker']} {temp_portfolios['F']['networth']:.2f}")
+    print(f"Date: {date.date()}, A: {temp_portfolios['A']['ticker']} {temp_portfolios['A']['networth']:.2f}, B: {temp_portfolios['B']['ticker']} {temp_portfolios['B']['networth']:.2f}, C: {temp_portfolios['C']['ticker']} {temp_portfolios['C']['networth']:.2f}, D: {temp_portfolios['D']['ticker']} {temp_portfolios['D']['networth']:.2f}, E: {temp_portfolios['E']['ticker']} {temp_portfolios['E']['networth']:.2f}, F: {temp_portfolios['F']['ticker']} {temp_portfolios['F']['networth']:.2f}")
 
