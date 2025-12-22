@@ -31,7 +31,7 @@ monthly_simple_returns = ME_prices.pct_change() # Keep all history for rolling c
 
 # Rolling 5yr (60 months) and 1yr (12 months)
 # min_periods=12 ensures we get data sooner, but 60 is strictly 5 years
-monthly_simple_returns_5yr = monthly_simple_returns.rolling(window=60).mean()
+monthly_simple_mean_5yr = monthly_simple_returns.rolling(window=60).mean()
 monthly_simple_std_5yr = monthly_simple_returns.rolling(window=60).std()
 monthly_simple_std_1yr = monthly_simple_returns.rolling(window=12).std()
 
@@ -81,7 +81,7 @@ def best_category(category, date_str):
 
         # FIX: Select based on 5-year average return (Momentum), not 1-month spot return
         # If you prefer 1-year momentum, change to: monthly_simple_returns.rolling(12).mean()
-        momentum_returns = monthly_simple_returns_5yr.loc[date, eligible_tickers]
+        momentum_returns = monthly_simple_mean_5yr.loc[date, eligible_tickers]
         
         max_ticker = momentum_returns.idxmax()
         max_return = momentum_returns.max()
@@ -127,12 +127,13 @@ def buy_ticker(ticker, date, capital):
             "num_shares": shares,
         }
 
-def valuate_ticker(ticker, date, num_shares):
+def sell_ticker(ticker, date, num_shares):
     if ticker == "cash":
         return num_shares
     else:
         price = MS_prices.loc[date, ticker]
-        return num_shares * price
+        capital = num_shares * price * (1 - SELL_FEE)
+        return capital
 
 # 8.Initialize Portfolios
 
@@ -154,18 +155,18 @@ for date in MS_prices.index:
     keep_portfolios = {}
     # Map month-start (MS) dates to month-end (ME) indices used by monthly_* datasets
     try:
-        me_idx = monthly_simple_returns_5yr.index.get_indexer([date], method='pad')[0]
+        me_idx = monthly_simple_mean_5yr.index.get_indexer([date], method='pad')[0]
         if me_idx == -1:
-            me_date = monthly_simple_returns_5yr.index[0]
+            me_date = monthly_simple_mean_5yr.index[0]
         else:
-            me_date = monthly_simple_returns_5yr.index[me_idx]
+            me_date = monthly_simple_mean_5yr.index[me_idx]
     except Exception:
         me_date = date
     for category in ["A", "B", "C", "D", "E", "F"]:
         ticker = temp_portfolios[category]["ticker"]
         price = MS_prices.loc[date, ticker]
         num_shares = temp_portfolios[category]["num_shares"]
-        monthly_simple_return_mean_5yr = monthly_simple_returns_5yr.loc[me_date, ticker]
+        monthly_simple_return_mean_5yr = monthly_simple_mean_5yr.loc[me_date, ticker]
         monthly_category = monthly_categories.loc[me_date, ticker]
         keep_portfolios[category] = {
             "ticker": ticker,
@@ -204,11 +205,11 @@ for date in MS_prices.index:
             rebalance_ticker = rebalance_portfolios[category]["ticker"]
             # Safely fetch returns (default to 0.0 if ticker is 'cash' or missing)
             try:
-                keep_return = monthly_simple_returns_5yr.loc[me_date, keep_ticker] if keep_ticker in monthly_simple_returns_5yr.columns else 0.0
+                keep_return = monthly_simple_mean_5yr.loc[me_date, keep_ticker] if keep_ticker in monthly_simple_mean_5yr.columns else 0.0
             except Exception:
                 keep_return = 0.0
             try:
-                rebalance_return = monthly_simple_returns_5yr.loc[me_date, rebalance_ticker] if rebalance_ticker in monthly_simple_returns_5yr.columns else 0.0
+                rebalance_return = monthly_simple_mean_5yr.loc[me_date, rebalance_ticker] if rebalance_ticker in monthly_simple_mean_5yr.columns else 0.0
             except Exception:
                 rebalance_return = 0.0
             if rebalance_return > keep_return:
@@ -218,3 +219,11 @@ for date in MS_prices.index:
     # Log portfolio status
     print(f"Date: {date.date()}, A: {temp_portfolios['A']['ticker']} {temp_portfolios['A']['networth']:.2f}, B: {temp_portfolios['B']['ticker']} {temp_portfolios['B']['networth']:.2f}, C: {temp_portfolios['C']['ticker']} {temp_portfolios['C']['networth']:.2f}, D: {temp_portfolios['D']['ticker']} {temp_portfolios['D']['networth']:.2f}, E: {temp_portfolios['E']['ticker']} {temp_portfolios['E']['networth']:.2f}, F: {temp_portfolios['F']['ticker']} {temp_portfolios['F']['networth']:.2f}")
 
+print("\nFinal Networth:")
+for category in ["A", "B", "C", "D", "E", "F"]:
+    ticker = temp_portfolios[category]["ticker"]
+    capital = temp_portfolios[category]["networth"]
+    if ticker != "cash":
+        capital = capital * (1 - SELL_FEE)
+    print(f"{category}: {capital:.2f}")
+    

@@ -46,104 +46,15 @@ Results:
     F: LEU 148451.29
 
 
+There were about 1300 tickers that were selected for the portfolio bot. It appears no ticker was good enough for low volatility categories. Next step is to allow 2 stocks in the portfolio.
+
 ## Problem 2: Computing Correlations and Log Returns
 
-The log returns are computed as
+Now we allow 2 stocks in the portfolio, we also consider cash as a riskless stock. We compute the expected return and the correlation matrix on the simple returns of the stocks. The solution uses a 3-D tensor to store the correlation matrix for each date.
 
-    ln(close_price_t / close_price_{t-1}).
-
-Create the functions, that compute the correlation matrix and the log returns of the stocks. To compute the log returns, we use the closing prices. For the log returns, we compute daily, weekly, monthly and yearly log returns. For the correlation matrix, we use the closing prices and we compute the daily, weekly, monthly and yearly correlation matrix.
-
-To compute the log returns, the inparameters are: ticker, start_date, end_date, returns_type (daily, weekly, monthly, yearly).
-
-To compute the correlation matrix, the inparameters are: ticker_1, ticker_2, start_date, end_date, correlation_type (daily, weekly, monthly, yearly). When ticker_1 == ticker_2, then the correlation matrix is the variance of the stock.
-
-Assume we sum N log returns of a stock, it holds that
-
-    ln(close_price_{t+1}/close_price_t) + ... + ln(close_price_{t+N}/close_price_{t+N-1}) = ln(close_price_{t+N}/close_price_t).
-
-The correlation is computed on the log returns. So the correlation is computed as
-
-    corr(r_1, r_2) = cov(r_1, r_2) / (std(r_1) * std(r_2))
-
-where r_1 and r_2 are the log returns of the two stocks.
-
-We assume a week is 5 days and a month is 21 days.
-
-### Log Returns
-
-* We use all daily data from 2017-01-02 to 2024-12-09 to compute daily log returns.
-* We use weekly data (friday closings) from 2017-01-02 to 2024-12-09 to compute weekly log returns.
-* We use monthly data (last day of month closings) from 2017-01-02 to 2024-12-09 to compute monthly log returns.
-* We use yearly data (last day of year closings) from 2017-01-02 to 2024-12-09 to compute yearly log returns.
-* Then we will test if 5 days of log returns are equivalent to 1 week of log returns.
-* Then we will test if 21 days of log returns are equivalent to 1 month of log returns.
-* Then we will test if 252 days of log returns are equivalent to 1 year of log returns.
-
-Added log returns are equivalent to the whole log return of the stock.
-
-### Correlation Matrix of Log Returns
-
-* We use all daily data from 2017-01-02 to 2024-12-09 to compute daily correlation matrix of log returns.
-* We use weekly data (friday closings) from 2017-01-02 to 2024-12-09 to compute weekly correlation matrix of log returns.
-* We use monthly data (last day of month closings) from 2017-01-02 to 2024-12-09 to compute monthly correlation matrix of log returns.
-* We use yearly data (last day of year closings) from 2017-01-02 to 2024-12-09 to compute yearly correlation matrix of log returns.
-* Then compare the correlation matrices of log returns.
-
-It shows that the correlation matrix of log returns changes over time, which indicates that an i.i.d assumption is not valid.
-
-### Portfolio Solver
-
-This portfolio solver uses the monthly correlation matrix of log returns to find the best portfolio. In this portfolio, we can pick only 2 stocks.
-
-Results at 2024-12-31:
-
-    A:
-    B:
-    C:
-    D:
-    E:
-
-STOP HERE!
-
-We create a function `portfolio_value(initial_value, initial_day, end_day, ticker_dict)` where ticker_dict keys are the tickers and the values are the weights of the portfolio. Ideally every weight is non-negative and the sum of all weights is 1. The function returns the value of the portfolio on end_day. And we cannot have more than 20 stocks in the portfolio.
-
-
-
-
-
-STOP HERE!
-
-
-The tickers are found in Data/nyse_listed.csv.
-
-
-
-
-
-We assume a years is 252 trading days. So the yearly volatility is calculated as the standard deviation of daily returns times sqrt(252). When we pick a portfolio we base on past volatility of last 252 trading days. We do not try to adjust for future volatility.
-
-A portfolio starts with 100k USD and has to end with as much money as possible. A portfolio can have minimum 1 stock and maximum 20 stocks. There is no interest rate on cash.
-
-## Project Structure
-
-The project is structured into a series of progressive tasks ("Problems"):
-
-*   **Problem 1: Data Acquisition & Exploration**: Fetching data from Yahoo Finance and preparing it for modeling.
-*   **Problem 2: Naive Models & Baselines**: Establishing baselines using simple methods (Persistence, Moving Average, ARIMA).
-*   **Problem 3: Advanced Models - LSTM**: Implementing Long Short-Term Memory (LSTM) networks for forecasting.
-*   **Problem 4: Advanced Models - Transformer**: Implementing Transformer architectures with attention mechanisms.
-*   **Problem 5: Portfolio Data & Analysis**: Expanding to multivariate time series with multiple stocks.
-*   **Problem 6: Portfolio Forecasting**: Applying advanced models to the full portfolio.
-
-## Key Objectives
-
-*   **Model Implementation**: Build and train LSTM and Transformer models.
-*   **Performance Comparison**: Evaluate models using RMSE, MAE, and directional accuracy.
-*   **Interpretability**: Visualize attention weights to understand model decision-making.
-
-## Tech Stack
-
-*   **Language**: Python
-*   **Data Source**: Yahoo Finance (`yfinance`)
-*   **Libraries**: Pandas, NumPy, Matplotlib/Seaborn, PyTorch/TensorFlow, Scikit-learn
+    Date: 2024-12-01
+    A: 108732.38
+    B: 91129.08
+    C: 124528.29
+    D: 209908.35
+    E: 51450.81
